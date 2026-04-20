@@ -41,7 +41,7 @@ void MX_SAI1_Init(void)
   /* USER CODE END SAI1_Init 1 */
 
   hsai_BlockA1.Instance = SAI1_Block_A;
-  hsai_BlockA1.Init.AudioMode = SAI_MODEMASTER_TX;
+  hsai_BlockA1.Init.AudioMode = SAI_MODEMASTER_RX;  /* RX: receive from INMP441 */
   hsai_BlockA1.Init.Synchro = SAI_ASYNCHRONOUS;
   hsai_BlockA1.Init.OutputDrive = SAI_OUTPUTDRIVE_DISABLE;
   hsai_BlockA1.Init.NoDivider = SAI_MASTERDIVIDER_DISABLE;
@@ -117,7 +117,7 @@ void HAL_SAI_MspInit(SAI_HandleTypeDef* saiHandle)
 
     hdma_sai1_a.Instance = DMA2_Channel1;
     hdma_sai1_a.Init.Request = DMA_REQUEST_1;
-    hdma_sai1_a.Init.Direction = DMA_MEMORY_TO_PERIPH;
+    hdma_sai1_a.Init.Direction = DMA_PERIPH_TO_MEMORY;  /* RX: SAI→memory */
     hdma_sai1_a.Init.PeriphInc = DMA_PINC_DISABLE;
     hdma_sai1_a.Init.MemInc = DMA_MINC_ENABLE;
     hdma_sai1_a.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
