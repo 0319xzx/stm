@@ -10,15 +10,15 @@
   *  spectral density at 40 mel-scale centre frequencies.  This produces
   *  qualitatively similar features to a triangular-filterbank mel spectrogram
   *  but is NOT identical to the typical Python/TensorFlow pre-processing
-  *  pipeline.  If the model was trained with a specific normalisation (e.g.
-  *  per-sample mean subtraction, global mean/variance normalisation), add that
+  *  pipeline.  If the model was trained with a specific normalization (e.g.
+  *  per-sample mean subtraction, global mean/variance normalization), add that
   *  step here to match training.
   *
   *  Algorithm per frame:
   *   1. Slide the 400-sample window forward by 160 samples (new hop).
   *   2. Apply a Hann window to the 400 samples.
   *   3. For each of the 40 mel-scale centre frequencies, run the Goertzel
-  *      algorithm to obtain the normalised power.
+  *      algorithm to obtain the normalized power.
   *   4. Apply log10(power + eps).
   *   5. Clip and quantise to int8 using the model's input Q-params
   *      (scale=0.042253252, zero_point=13).
@@ -82,7 +82,7 @@ static uint32_t s_frame_count     = 0;   /* total frames pushed (capped at FEAT_
  *
  * @param  samples  Float samples (Hann-windowed, length N = FEAT_FRAME_LEN).
  * @param  coeff    2 * cos(2*pi*k/N) where k = f * N / Fs.
- * @return Normalised power (sum-of-squares normalised by N^2).
+ * @return Normalized power (sum-of-squares normalized by N^2).
  */
 static float goertzel_power(const float *samples, float coeff)
 {
