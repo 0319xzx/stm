@@ -58,6 +58,8 @@
 #include "network_data.h"
 
 /* USER CODE BEGIN includes */
+#include "audio_capture.h"
+#include "feature_extract.h"
 /* USER CODE END includes */
 
 /* IO buffers ----------------------------------------------------------------*/
@@ -169,28 +171,112 @@ static int ai_run(void)
 }
 
 /* USER CODE BEGIN 2 */
-int acquire_and_process_data(ai_i8* data[])
-{
-  /* fill the inputs of the c-model
-  for (int idx=0; idx < AI_NETWORK_IN_NUM; idx++ )
-  {
-      data[idx] = ....
-  }
 
-  */
-  return 0;
+/* ---------------------------------------------------------------------------
+ * Decision-fusion state
+ * ---------------------------------------------------------------------------
+ * Model output quantisation (from network_generate_report.txt):
+ *   QLinear(scale=0.003906250, zero_point=-128, int8)
+ *   float_score = (q_out - (-128)) * 0.003906250
+ *
+ * Trigger condition (user-specified):
+ *   Threshold float 0.55 → int8 q = round(0.55/0.003906250) + (-128)
+ *                         = round(140.8) - 128 = 141 - 128 = 13
+ *   → q_out >= 13  ≡  score >= ~0.550781
+ *
+ * Consecutive-frame counter: 5 frames above threshold → trigger event.
+ * Cooldown: 30 frames (~300 ms) after a trigger, reset counter.
+ * --------------------------------------------------------------------------*/
+#define DECISION_THRESHOLD_Q   13        /* int8 output threshold             */
+#define DECISION_CONSEC_REQ    5         /* consecutive frames required       */
+#define DECISION_COOLDOWN_FRAMES 30      /* frames to skip after a trigger    */
+
+#define OUT_SCALE    0.003906250f
+#define OUT_ZP       (-128)
+
+static int16_t  s_consec_count  = 0;
+static int16_t  s_cooldown      = 0;
+static uint32_t s_total_frames  = 0;
+
+/*
+ * acquire_and_process_data:
+ *   1. Try to consume one 10 ms audio hop from the DMA double-buffer.
+ *   2. Push it into the feature extractor (slides the 400-sample window).
+ *   3. If the 98-frame feature matrix is ready, fill the AI input buffer.
+ *   Returns  0 on success (inference should proceed)
+ *           -1 if no new hop or feature matrix not yet full.
+ */
+int acquire_and_process_data(ai_i8 *data[])
+{
+    int16_t hop[FEAT_HOP_LEN];
+
+    /* Wait for the next 10 ms audio hop from DMA callback */
+    if (!Audio_Capture_ConsumeHop(hop))
+    {
+        return -1;   /* No new audio data yet */
+    }
+
+    /* Slide feature window and compute one new mel-energy row */
+    Feature_Extract_PushHop(hop);
+
+    /* Not enough frames yet for the first full 98-frame window */
+    if (!Feature_Extract_IsReady())
+    {
+        return -1;
+    }
+
+    /* Fill the AI input buffer (data_ins[0] points into activations buffer) */
+    Feature_Extract_GetMatrix((int8_t *)data[0]);
+
+    return 0;
 }
 
-int post_process(ai_i8* data[])
+/*
+ * post_process:
+ *   Read the single int8 output byte, dequantise to float, apply 5-frame
+ *   consecutive threshold logic with cooldown, and print result via UART.
+ */
+int post_process(ai_i8 *data[])
 {
-  /* process the predictions
-  for (int idx=0; idx < AI_NETWORK_OUT_NUM; idx++ )
-  {
-      data[idx] = ....
-  }
+    int8_t  q_out  = ((int8_t *)data[0])[0];
+    float   score  = (float)(q_out - OUT_ZP) * OUT_SCALE;
 
-  */
-  return 0;
+    s_total_frames++;
+
+    int triggered = 0;
+
+    if (s_cooldown > 0)
+    {
+        s_cooldown--;
+        s_consec_count = 0;
+    }
+    else
+    {
+        if (q_out >= DECISION_THRESHOLD_Q)
+        {
+            s_consec_count++;
+            if (s_consec_count >= DECISION_CONSEC_REQ)
+            {
+                triggered      = 1;
+                s_consec_count = 0;
+                s_cooldown     = DECISION_COOLDOWN_FRAMES;
+            }
+        }
+        else
+        {
+            s_consec_count = 0;
+        }
+    }
+
+    /* UART output: frame index, raw int8 output, float score, trigger flag */
+    printf("[%5lu] q=%4d  score=%.4f  consec=%d  %s\r\n",
+           (unsigned long)s_total_frames,
+           (int)q_out,
+           score,
+           (int)s_consec_count,
+           triggered ? "*** TRIGGER ***" : "");
+
+    return 0;
 }
 /* USER CODE END 2 */
 
@@ -199,7 +285,7 @@ int post_process(ai_i8* data[])
 void MX_X_CUBE_AI_Init(void)
 {
     /* USER CODE BEGIN 5 */
-  printf("\r\nTEMPLATE - initialization\r\n");
+  printf("\r\n[AI] X-CUBE-AI network init\r\n");
 
   ai_boostrap(data_activations0);
     /* USER CODE END 5 */
@@ -208,28 +294,40 @@ void MX_X_CUBE_AI_Init(void)
 void MX_X_CUBE_AI_Process(void)
 {
     /* USER CODE BEGIN 6 */
-  int res = -1;
+    /*
+     * Audio-driven inference pipeline (non-blocking, called from main loop):
+     *
+     *  1. acquire_and_process_data: consume one 10 ms audio hop, update the
+     *     feature matrix.  Returns -1 if no data yet (skip inference this
+     *     call) or 0 when the 98×40 matrix is ready.
+     *  2. ai_run: run the X-CUBE-AI inference engine.
+     *  3. post_process: dequantise output, apply 5-frame decision fusion,
+     *     print to UART.
+     *
+     * The original do/while(res==0) template is replaced here to prevent the
+     * error handler from firing on a "no data yet" (-1) return code.
+     */
+    int res;
 
-  printf("TEMPLATE - run - main loop\r\n");
+    if (!network) return;
 
-  if (network) {
+    res = acquire_and_process_data(data_ins);
 
-    do {
-      /* 1 - acquire and pre-process input data */
-      res = acquire_and_process_data(data_ins);
-      /* 2 - process the data - call inference engine */
-      if (res == 0)
-        res = ai_run();
-      /* 3- post-process the predictions */
-      if (res == 0)
-        res = post_process(data_outs);
-    } while (res==0);
-  }
+    if (res != 0)
+    {
+        /* No new feature frame ready – come back next main-loop iteration */
+        return;
+    }
 
-  if (res) {
-    ai_error err = {AI_ERROR_INVALID_STATE, AI_ERROR_CODE_NETWORK};
-    ai_log_err(err, "Process has FAILED");
-  }
+    res = ai_run();
+    if (res != 0)
+    {
+        ai_error err = {AI_ERROR_INVALID_STATE, AI_ERROR_CODE_NETWORK};
+        ai_log_err(err, "ai_run failed");
+        return;
+    }
+
+    post_process(data_outs);
     /* USER CODE END 6 */
 }
 #ifdef __cplusplus

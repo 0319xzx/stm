@@ -25,7 +25,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "usart.h"
+#include "audio_capture.h"
+#include "feature_extract.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -91,9 +93,11 @@ int main(void)
   MX_GPIO_Init();
   MX_DMA_Init();
   MX_SAI1_Init();
+  MX_USART2_UART_Init();
   MX_X_CUBE_AI_Init();
   /* USER CODE BEGIN 2 */
-
+  Feature_Extract_Init();
+  Audio_Capture_Start();
   /* USER CODE END 2 */
 
   /* Infinite loop */
