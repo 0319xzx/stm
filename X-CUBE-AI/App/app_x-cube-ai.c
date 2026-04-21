@@ -60,6 +60,7 @@
 /* USER CODE BEGIN includes */
 #include "audio_capture.h"
 #include "feature_extract.h"
+#include "sound_led.h"
 /* USER CODE END includes */
 
 /* IO buffers ----------------------------------------------------------------*/
@@ -215,6 +216,9 @@ int acquire_and_process_data(ai_i8 *data[])
     {
         return -1;   /* No new audio data yet */
     }
+
+    /* Update sound-level LED: ON when amplitude exceeds threshold, else OFF */
+    Sound_LED_UpdateHop(hop, FEAT_HOP_LEN);
 
     /* Slide feature window and compute one new mel-energy row */
     Feature_Extract_PushHop(hop);

@@ -4,7 +4,37 @@
 
 ---
 
-## 硬件连接（INMP441 → Nucleo-L476RG）
+## 声音指示灯（LD2 / PA5）
+
+板载 LD2（绿色 LED，位于 PA5）用作实时声音指示灯：
+
+| 状态 | LED |
+|---|---|
+| 当前 10 ms 音频 hop 的平均绝对幅值 ≥ 阈值 | **亮** |
+| 平均绝对幅值 < 阈值 | **立即灭**（无保持时间） |
+
+### 阈值调整
+
+阈值定义在 `Core/Inc/sound_led.h`：
+
+```c
+#define SOUND_LED_THRESHOLD   300U   /* int16_t PCM 均值绝对值，0–32767 */
+```
+
+| 典型幅值参考（MAV，平均绝对值） | 说明 |
+|---|---|
+| 50 – 200 | 静音 / 环境底噪 |
+| 500 – 3000 | 正常说话（距麦克风 20–30 cm） |
+| 5000 – 20000 | 大声拍掌 / 喊叫 |
+
+- **降低阈值**（如改为 `100`）→ 对更轻微的声音响应  
+- **提高阈值**（如改为 `1000`）→ 仅对较大声音响应
+
+修改后重新编译烧录即可，无需其他改动。
+
+---
+
+
 
 | INMP441 引脚 | STM32 引脚 | 说明 |
 |---|---|---|
@@ -106,16 +136,18 @@ MCKDIV = round(SAI_CLK / (2 × 目标Fs × 帧长))
 | `Core/Src/usart.c` | USART2 初始化（PA2/PA3，115200 baud），printf 重定向 |
 | `Core/Inc/audio_capture.h` | SAI1A DMA 循环采集 API |
 | `Core/Src/audio_capture.c` | DMA 半完成/完成回调，音频 hop 缓冲 |
+| `Core/Inc/sound_led.h` | 声音指示灯 API 及阈值宏（SOUND_LED_THRESHOLD） |
+| `Core/Src/sound_led.c` | 均值绝对幅值计算与 PA5 LED 驱动 |
 | `Core/Inc/feature_extract.h` | 特征提取 API（98×40 int8） |
 | `Core/Src/feature_extract.c` | Goertzel 算法近似 log-mel 特征（见注意事项） |
 
 ### 修改文件
 | 文件 | 修改内容 |
 |---|---|
-| `Core/Src/sai.c` | AudioMode: TX→**RX**；DMA Direction: MEMORY_TO_PERIPH→**PERIPH_TO_MEMORY** |
+| `Core/Src/gpio.c` | 新增 GPIOA 时钟使能、PA5 推挽输出初始化（LD2 指示灯） |
 | `Core/Src/main.c` | 新增 USART2 初始化、feature_extract 初始化、启动 SAI DMA |
-| `X-CUBE-AI/App/app_x-cube-ai.c` | 实现 acquire_and_process_data / post_process；重写 MX_X_CUBE_AI_Process 为非阻塞模式 |
-| `MDK-ARM/test.uvprojx` | 新增 usart.c / audio_capture.c / feature_extract.c / stm32l4xx_hal_uart.c / stm32l4xx_hal_uart_ex.c |
+| `X-CUBE-AI/App/app_x-cube-ai.c` | 实现 acquire_and_process_data / post_process；重写 MX_X_CUBE_AI_Process 为非阻塞模式；每个 hop 调用 Sound_LED_UpdateHop() |
+| `MDK-ARM/test.uvprojx` | 新增 usart.c / audio_capture.c / feature_extract.c / sound_led.c / stm32l4xx_hal_uart.c / stm32l4xx_hal_uart_ex.c |
 
 ---
 
